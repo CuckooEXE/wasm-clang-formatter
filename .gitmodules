@@ -1,0 +1,6 @@
+[submodule "formatter/clang"]
+	path = formatter/clang
+	url = https://github.com/YoWASP/clang.git
+[submodule "clang"]
+	path = clang
+	url = https://github.com/YoWASP/clang.git

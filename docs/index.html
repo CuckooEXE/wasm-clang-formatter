@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<meta name="color-scheme" content="light dark">
+		<title>clang-format-web</title>
+		<meta name="description" content="clang-format your code in the web.">
+		<link
+			rel="stylesheet"
+			href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.1.1/css/pico.min.css"
+			>
+		<link
+			href="https://fonts.googleapis.com/css2?family=Raleway:ital,wght@1,900&display=swap"
+			>
+		<style>
+			.gradient {
+				font-family: 'Raleway', sans-serif;
+				margin-top: 1em;
+				text-align:center;
+				background: linear-gradient(27deg, #7928CA, #FF0080, #7928CA, #FF0080);
+				background-clip: text;
+				-webkit-background-clip: text;
+				-webkit-text-fill-color: transparent;
+			}
+		</style>
+	</head>
+	<body>
+		<header class="container" style="text-align: center; padding-top: 1em;">
+			<hgroup>
+				<h1 class="gradient">Clang-Format-Web</h1>
+				<p><code><a href="https://clang.llvm.org/docs/ClangFormat.html" target="_blank">clang-format</a></code> styling in the web, completely local.</p>
+			</hgroup>
+		</header>
+		<main class="container">
+			<h3 style="margin: 0;">Methodology</h3>
+			<small>
+			This site contains <code>clang-format</code> compiled to WASM. Everytime you modify either the <code>.clang-format</code> or the "Code" textarea, a Javascript handler will fire, call a WASM-compiled <code>clang-format</code>, and format your code.
+			</small>
+			<div class="grid" style="margin-top: 2em;">
+				<label for="presetSelect"><code>.clang-format</code> Preset</label>
+				<div></div>
+				<div></div>
+			</div>
+			<div class="grid">
+				<select id="presetSelect" name="presetSelect" required>
+					<option value="" selected>None</option>
+					<option value="">WebKit</option>
+					<option value="">LLVM</option>
+				</select>
+				<div></div>
+				<div></div>
+			</div>
+			<small>Selecting a preset will delete the contents of the <code>.clang-format</code> area!</small>
+			<div class="grid">
+				<p><code>.clang-format</code></p>
+				<p>Code</p>
+			</div>
+			<div class="grid">
+				<textarea style="font-size: 1em;" id=".clang-format" is="highlighted-code" cols="80" rows="25" language="yaml" tab-size="2" name=".clang-format" aria-describedby=".clang-formatHelper"></textarea>
+				<textarea id="code" is="highlighted-code" cols="80" rows="25" language="yaml" tab-size="2" name="code" aria-describedby="codeHelper" ></textarea>
+			</div>
+		</main>
+		<script type="module" defer>
+      (
+         async ({ chrome, netscape }) => {
+            if (!chrome && !netscape)
+               await import('https://unpkg.com/@ungap/custom-elements'); 
+
+            const { default: HighlightedCode } = await import('https://unpkg.com/highlighted-code'); 
+            HighlightedCode.useTheme(window.matchMedia('(prefers-color-scheme: dark)').matches ?  'atom-one-dark-reasonable' : 'default');
+
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+               HighlightedCode.useTheme(e.matches ? 'atom-one-dark-reasonable' : 'default');
+            });
+         }
+      )(self);
+		</script>
+		<script>
+			fetch("formatter.wasm")
+			.then(r => r.arrayBuffer())
+			.then(bytes => WebAssembly.instantiate(bytes, {
+				wasi_snapshot_preview1: {
+					proc_exit: () => { throw new Error("proc_exit"); },
+					fd_write: () => 0,
+					fd_read: () => 0,
+					fd_close: () => 0,
+					fd_seek: () => 0,
+					fd_fdstat_get: () => 0,
+					fd_filestat_get: () => 0,
+					fd_prestat_get: () => 0,
+					fd_prestat_dir_name: () => 0,
+					path_open: () => 0,
+					environ_get: () => 0,
+					environ_sizes_get: () => 0,
+				}
+			}))
+			.then(results => {
+				const { memory, malloc, free, getStyles, getStyle } = results.instance.exports;
+
+				function writeCString(str, min = 0) {
+					const encoder = new TextEncoder();
+					const bytes = encoder.encode(str + "\0");
+					if (min === 0) min = bytes.length;
+					const ptr = malloc(min); // use WASM malloc
+					new Uint8Array(memory.buffer).set(bytes, ptr);
+					return [ptr, min];
+				}
+
+				function readCString(ptr, maxLen) {
+					const slice = new Uint8Array(memory.buffer).subarray(ptr, ptr + maxLen);
+					const end = slice.indexOf(0);
+					return new TextDecoder().decode(slice.subarray(0, end));
+				}
+
+				function getStyle_wrapper(presetName) {
+					const BUF_SIZE = 4096 * 10;
+					const [ptr, _] = writeCString(presetName, BUF_SIZE);
+					const written = getStyle(ptr, BUF_SIZE);
+					if (written < 0) throw new Error("Buffer too small or preset not found");
+					const result = readCString(ptr, written);
+					free(ptr);
+					return result;
+				}
+
+				function getStyles_wrapper() {
+					const BUF_SIZE = 512;
+					const ptr = malloc(BUF_SIZE);
+					const written = getStyles(ptr, BUF_SIZE);
+					if (written < 0) throw new Error("Buffer too small");
+					const list = readCString(ptr, BUF_SIZE);
+					free(ptr);
+					return list.split(",");
+				}
+
+				document.getElementById('.clang-format').value = getStyle_wrapper('None (Default)');
+
+				const dropdown = document.getElementById("presetSelect");
+				dropdown.innerHTML = "";
+				for (const style of getStyles_wrapper()) {
+					const option = document.createElement("option");
+					option.value = style;
+					option.textContent = style;
+					dropdown.appendChild(option);
+				}
+
+				dropdown.addEventListener("change", event => {
+					const preset = event.target.value;
+					const styleText = getStyle_wrapper(preset);
+					document.getElementById('.clang-format').value = styleText;
+				});
+
+				var input = document.getElementById('.clang-format');
+			});
+		</script>
+	</body>
+</html>
