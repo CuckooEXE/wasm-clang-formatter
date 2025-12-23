@@ -35,7 +35,7 @@
 		<main class="container">
 			<h3 style="margin: 0;">Methodology</h3>
 			<small>
-			This site contains <code>clang-format</code> compiled to WASM. Everytime you modify either the <code>.clang-format</code> or the "Code" textarea, a Javascript handler will fire, call a WASM-compiled <code>clang-format</code>, and format your code.
+				This site contains <code>clang-format</code> compiled to WASM. Write your configuration (or select a preset), write your code, and hit "Format"!
 			</small>
 			<div class="grid" style="margin-top: 2em;">
 				<label for="presetSelect"><code>.clang-format</code> Preset</label>
@@ -44,9 +44,7 @@
 			</div>
 			<div class="grid">
 				<select id="presetSelect" name="presetSelect" required>
-					<option value="" selected>None</option>
-					<option value="">WebKit</option>
-					<option value="">LLVM</option>
+					<option value="" selected>Loading...</option>
 				</select>
 				<div></div>
 				<div></div>
@@ -58,7 +56,12 @@
 			</div>
 			<div class="grid">
 				<textarea style="font-size: 1em;" id=".clang-format" is="highlighted-code" cols="80" rows="25" language="yaml" tab-size="2" name=".clang-format" aria-describedby=".clang-formatHelper"></textarea>
-				<textarea id="code" is="highlighted-code" cols="80" rows="25" language="yaml" tab-size="2" name="code" aria-describedby="codeHelper" ></textarea>
+				<textarea style="font-size: 1em;" id="code" is="highlighted-code" cols="80" rows="25" language="yaml" tab-size="2" name="code" aria-describedby="codeHelper" ></textarea>
+			</div>
+			<div class="grid">
+				<div></div>
+				<button id="format">Format Code</button>
+				<div></div>
 			</div>
 		</main>
 		<script type="module" defer>
@@ -81,22 +84,29 @@
 			.then(r => r.arrayBuffer())
 			.then(bytes => WebAssembly.instantiate(bytes, {
 				wasi_snapshot_preview1: {
-					proc_exit: () => { throw new Error("proc_exit"); },
-					fd_write: () => 0,
-					fd_read: () => 0,
-					fd_close: () => 0,
-					fd_seek: () => 0,
-					fd_fdstat_get: () => 0,
-					fd_filestat_get: () => 0,
-					fd_prestat_get: () => 0,
-					fd_prestat_dir_name: () => 0,
-					path_open: () => 0,
+					args_get: () => 0,
+					args_sizes_get: () => 0,
 					environ_get: () => 0,
 					environ_sizes_get: () => 0,
-				}
+					clock_time_get: () => 0,
+					fd_close: () => 0,
+					fd_fdstat_get: () => 0,
+					fd_filestat_get: () => 0,
+					fd_pread: () => 0,
+					fd_prestat_get: () => 0,
+					fd_prestat_dir_name: () => 0,
+					fd_read: () => 0,
+					fd_readdir: () => 0,
+					fd_seek: () => 0,
+					fd_write: () => 0,
+					path_filestat_get: () => 0,
+					path_open: () => 0,
+					path_readlink: () => 0,
+					proc_exit: () => 0,
+				},
 			}))
 			.then(results => {
-				const { memory, malloc, free, getStyles, getStyle } = results.instance.exports;
+				const { memory, malloc, free, getStyles, getStyle, formatCode } = results.instance.exports;
 
 				function writeCString(str, min = 0) {
 					const encoder = new TextEncoder();
@@ -114,12 +124,14 @@
 				}
 
 				function getStyle_wrapper(presetName) {
+					console.log(`getStyle_wrapper(${presetName})`);
 					const BUF_SIZE = 4096 * 10;
 					const [ptr, _] = writeCString(presetName, BUF_SIZE);
 					const written = getStyle(ptr, BUF_SIZE);
 					if (written < 0) throw new Error("Buffer too small or preset not found");
 					const result = readCString(ptr, written);
 					free(ptr);
+					console.log(`result.length = ${result.length}`);
 					return result;
 				}
 
@@ -133,7 +145,20 @@
 					return list.split(",");
 				}
 
-				document.getElementById('.clang-format').value = getStyle_wrapper('None (Default)');
+				function formatCode_wrapper(code, configText) {
+					const BUF_SIZE = 4096 * 5;
+
+					const [codePtr, codeLen] = writeCString(code, BUF_SIZE);
+					const [configPtr, configLen] = writeCString(configText, BUF_SIZE);
+
+					const written = formatCode(configPtr, configLen, codePtr, codeLen);
+					console.log(`written = ${written}`);
+					if (written < 0)
+						throw new Error("Buffer too small or failed formatting");
+
+					const formattedCode = readCString(codePtr, written);
+					return formattedCode;
+				}
 
 				const dropdown = document.getElementById("presetSelect");
 				dropdown.innerHTML = "";
@@ -147,10 +172,14 @@
 				dropdown.addEventListener("change", event => {
 					const preset = event.target.value;
 					const styleText = getStyle_wrapper(preset);
-					document.getElementById('.clang-format').value = styleText;
+					document.getElementById('.clang-format').value = `# Preset: ${preset}\n` + styleText;
 				});
+				dropdown.value = "None (Default)";
+				dropdown.dispatchEvent(new Event("change"));
 
-				var input = document.getElementById('.clang-format');
+				document.getElementById('format').addEventListener("click", () => {
+					document.getElementById('code').value = formatCode_wrapper(document.getElementById('code').value, document.getElementById('.clang-format').value);
+				});
 			});
 		</script>
 	</body>

@@ -131,31 +131,36 @@ int getStyles(char* ptr, int len) {
     return pos;
 }
 
-int main() {
-    std::string code =
-        "int  main( ){int x=1; if(x){x++;}}\n";
+/**
+ * @brief Get the default style for a particular preset
+ * @param configPtr Pointer to memory containing the configuration
+ * @param configLen Length of the pointer
+ * @param codePtr Pointer to memory containing the code, and where we will write the output to
+ * @param codeLen Length of the pointer
+ * @returns Number of bytes written (including null-terminator). -1 if the `ptr` wasn't long enough
+ */
+__attribute__((export_name("formatCode")))
+int formatCode(char* configPtr, int configLen, char* codePtr, int codeLen) {
+    if (!configPtr || configLen <= 0 || !codePtr || codeLen <= 0)
+        return -1;
 
-    FormatStyle style = getWebKitStyle();
-    style.ColumnLimit = 80;
+    FormatStyle myStyle;
 
-    tooling::Replacements repls =
-        reformat(style, code,
-                 {tooling::Range(0, code.size())},
-                 "input.cc");
-    std::cout << "TEST" << std::endl;
+    myStyle.Language = guessLanguage("", codePtr);
+    if (myStyle.Language == FormatStyle::LanguageKind::LK_None)
+        return -1;
 
-    auto formatted = tooling::applyAllReplacements(code, repls);
-    if (!formatted) {
-        std::cout << "formatting failed" << std::endl;
-        return 1;
-    }
+    std::error_code e = parseConfiguration(configPtr, &myStyle);
+    if (e)
+        return -1;
 
-        std::cout <<  *formatted << std::endl;
-    return 0;
+    std::string code = codePtr;
+    tooling::Replacements repls = reformat(myStyle, code, {tooling::Range(0, code.size())});
+    llvm::Expected<std::string> formatted = tooling::applyAllReplacements(code, repls);
+    if (!formatted)
+        return -1;
+
+    codePtr[(*formatted).size()] = '\0';
+    strcpy(codePtr, (*formatted).data());
+    return strlen(codePtr) + 1;
 }
-
-
-
-
-void* mmap(void* addr, size_t length, int prot, int flags, int fd, long offset) { return NULL; }
-int munmap(void* addr, size_t length) { return 0; }
